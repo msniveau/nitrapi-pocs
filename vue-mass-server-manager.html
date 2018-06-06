@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.min.js"></script>
+    <script src="https://unpkg.com/vue-material@beta"></script>
+    <script src="https://static.nitrado.net/cdn/nitrapi/nitrapi.min.js"></script>
+    <meta content="width=device-width,initial-scale=1,minimal-ui" name="viewport">
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700,400italic|Material+Icons">
+    <link rel="stylesheet" href="https://unpkg.com/vue-material@beta/dist/vue-material.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/vue-material@beta/dist/theme/default.css">
+    <title>Post Scriptum - ServerControl</title>
+</head>
+<body>
+
+<div id="app">
+    <md-toolbar md-elevation="1">
+        <h3 class="md-title" style="flex: 1">MassServerManager</h3>
+        <div class="md-layout-item md-size-15">
+            <md-field>
+                <label>delay (seconds)</label>
+                <md-input v-model="delay" type="number"></md-input>
+            </md-field>
+        </div>
+        <md-button class="md-primary" @click="massAction('restart')">Restart all</md-button>
+        <md-button class="md-accent" @click="massAction('stop')">Stop all</md-button>
+    </md-toolbar>
+
+    <br/>
+    <md-progress-bar md-mode="determinate" :md-value="progress"
+                     v-if="typeof(progress) === 'number'"></md-progress-bar>
+    <md-list>
+        <md-list-item v-for="service in services"
+                      :style="service.gameserver.status === 'stopped' ? 'background-color: #ffc1c1;' : ''"
+                      :key="service.id">
+            <md-avatar>
+                <img :src="'https://static.nitrado.net/cdn/gameicons/64/' + service.gameserver.game + '.jpg'"
+                     :alt="service.gameserver.game_human">
+            </md-avatar>
+
+            <div class="md-list-item-text">
+                <span>{{ Object.keys(service.gameserver.query).length === 0 ? service.gameserver.game_human : service.gameserver.query.server_name }}</span>
+                <span>{{ service.username }} <span
+                        v-if="Object.keys(service.gameserver.query).length">{{ service.gameserver.query.map }} | {{ service.gameserver.query.version }}</span></span>
+                <p>{{ service.gameserver.ip + ':' + service.gameserver.port }}</p>
+            </div>
+            <div v-if="current == service.id">
+                <md-progress-spinner :md-diameter="30" :md-stroke="3"
+                                     md-mode="indeterminate"></md-progress-spinner>
+            </div>
+            <div v-else>
+                <md-chip v-if="typeof(service.gameserver.query.player_current) === 'number'">{{
+                    service.gameserver.query.player_current }} / {{
+                    service.gameserver.query.player_max }}
+                </md-chip>
+                <md-button class="md-icon-button md-list-action" title="restart"
+                           @click="schedule('restart',service.id)">
+                    <md-icon class="md-primary">repeat</md-icon>
+                </md-button>
+                <md-button class="md-icon-button md-list-action" title="stop"
+                           @click="schedule('stop',service.id)">
+                    <md-icon class="md-accent">stop</md-icon>
+                </md-button>
+            </div>
+        </md-list-item>
+        <md-snackbar md-position="center" :md-active.sync="notify" md-persistent>
+            <span>{{ message }}</span>
+            <md-button class="md-primary" @click="showSnackbar = false">ok</md-button>
+        </md-snackbar>
+    </md-list>
+</div>
+<script>
+  Vue.use(VueMaterial.default);
+  var app = new Vue({
+    el: '#app',
+    data: {
+      services: {},
+      notify: false,
+      message: '',
+      current: false,
+      delay: 0,
+      progress: false,
+      refreshing: false,
+      access_token: 'ACCESS_TOKEN_HERE'
+    },
+    methods: {
+      sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      },
+      async massAction(action) {
+        var services = Object.keys(this.services);
+        for (var i = 0; i < services.length; i++) {
+          this.progress = i / services.length * 100;
+          this.current = services[i];
+          this.schedule(action, services[i], false);
+          if (this.delay > 0) {
+            await this.sleep(this.delay * 1000);
+          }
+        }
+        this.progress = false;
+        this.current = false;
+        this.message = (action == 'restart' ? 'Restarted' : 'Stopped') + ' all Gameservers';
+        this.notify = true;
+        var ms = 10000;
+        if (action === 'restart') {
+          ms = 20000;
+        }
+        this.refresh(ms);
+      },
+      schedule(action, id, notify = true) {
+        var that = this;
+        switch (action) {
+          case 'restart':
+            this.nitrapi.gameserver.restart(id).then(function(data) {
+              that.message = data.message;
+            });
+            if (notify) {
+              that.notify = true;
+              this.refresh(2000);
+            }
+            break;
+          case 'stop':
+            this.nitrapi.gameserver.stop(id).then(function(data) {
+              that.message = data.message;
+            });
+            if (notify) {
+              that.notify = true;
+              this.refresh(10000);
+            }
+            break;
+          default:
+            this.message = 'Unknown action: ' + action;
+            this.notify = true;
+        }
+      },
+      async refresh(ms = 0) {
+        var that = this;
+        if (that.refreshing) {
+          return;
+        }
+        that.refreshing = true;
+        await this.sleep(ms);
+        this.nitrapi.service.list().then(function(services) {
+          var service_ids = [];
+          for (var i = 0; i < services.data.services.length; i++) {
+            if (services.data.services[i].type === 'gameserver' &&
+                services.data.services[i].status === 'active') {
+              that.updateService(services.data.services[i]);
+            }
+          }
+        });
+        that.refreshing = false;
+      },
+      updateService(service) {
+        var that = this;
+        var service = service;
+        this.nitrapi.gameserver.details(service.id).then(function(data) {
+          service.gameserver = data.data.gameserver;
+          Vue.set(that.services, service.id, service);
+        });
+      }
+    },
+    created: function() {
+      this.nitrapi = new Nitrapi(this.access_token);
+      this.refresh();
+      window.setInterval(this.refresh, 1 * 60 * 1000);
+    }
+  });
+</script>
+<style>
+    #app {
+        padding-top: 40px;
+        width: 80%;
+        margin-left: auto;
+        margin-right: auto;
+    }
+</style>
+
+</body>
+</html>
