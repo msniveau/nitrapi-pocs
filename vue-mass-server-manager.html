@@ -42,7 +42,8 @@
             <div class="md-list-item-text">
                 <span>{{ Object.keys(service.gameserver.query).length === 0 ? service.gameserver.game_human : service.gameserver.query.server_name }}</span>
                 <span>{{ service.username }} <span
-                        v-if="Object.keys(service.gameserver.query).length">{{ service.gameserver.query.map }} | {{ service.gameserver.query.version }}</span></span>
+                        v-if="Object.keys(service.gameserver.query).length">{{ service.gameserver.query.map }}
+                        | {{ service.gameserver.query.version }}</span></span>
                 <p>{{ service.gameserver.ip + ':' + service.gameserver.port }}</p>
             </div>
             <div v-if="current == service.id">
@@ -50,9 +51,9 @@
                                      md-mode="indeterminate"></md-progress-spinner>
             </div>
             <div v-else>
-                <md-chip v-if="typeof(service.gameserver.query.player_current) === 'number'">{{
-                    service.gameserver.query.player_current }} / {{
-                    service.gameserver.query.player_max }}
+                <md-chip
+                        v-if="typeof(service.gameserver.query.player_current) === 'number'">{{ service.gameserver.query.player_current }}
+                    / {{ service.gameserver.query.player_max }}
                 </md-chip>
                 <md-button class="md-icon-button md-list-action" title="restart"
                            @click="schedule('restart',service.id)">
@@ -77,7 +78,7 @@
         </md-list-item>
         <md-snackbar md-position="center" :md-active.sync="notify" md-persistent>
             <span>{{ message }}</span>
-            <md-button class="md-primary" @click="notify = false">ok</md-button>
+            <md-button class="md-primary" @click="showSnackbar = false">ok</md-button>
         </md-snackbar>
         <md-dialog :md-active.sync="configFiles">
             <md-dialog-title>Config Editor</md-dialog-title>
@@ -85,12 +86,15 @@
             <md-tabs>
                 <md-tab :md-label="file.split('/').slice(-1)[0]" v-for="cfg, file in configFiles">
                     <md-field>
-                        <label>Textarea</label>
-                        <md-textarea v-model="configFiles[file]" style="height:500px;"></md-textarea>
+                        <label>{{ file }}</label>
+                        <md-textarea v-model="configFiles[file]"
+                                     style="height:500px;"></md-textarea>
                     </md-field>
                     <md-button class="md-primary" @click="configFiles = null">cancel</md-button>
-                    <md-button class="md-accent" @click="deployConfig(file, true)">Deploy to all</md-button>
-                    <md-button class="md-accent" @click="deployConfig(file)">Deploy to this</md-button>
+                    <md-button class="md-accent" @click="deployConfig(file, true)">Deploy to all
+                    </md-button>
+                    <md-button class="md-accent" @click="deployConfig(file)">Deploy to this
+                    </md-button>
                 </md-tab>
             </md-tabs>
         </md-dialog>
@@ -111,153 +115,158 @@
       delay: 0,
       progress: false,
       refreshing: false,
-      access_token: '$ACCESS_TOKEN_HERE$',
+      access_token: '$ACCESS_TOKEN_HERE$'
     },
     methods: {
       sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
       },
       async massAction(action) {
-        var services = Object.keys(this.services);
-        for (var i = 0; i < services.length; i++) {
-          this.progress = i / services.length * 100;
-          this.current = services[i];
-          this.schedule(action, services[i], false);
-          if (this.delay > 0) {
-            await this.sleep(this.delay * 1000);
-          }
-        }
-        this.progress = false;
-        this.current = false;
-        this.message = (action == 'restart' ? 'Restarted' : 'Stopped') + ' all Gameservers';
-        this.notify = true;
-        var ms = 10000;
-        if (action === 'restart') {
-          ms = 20000;
-        }
-        this.refresh(ms);
-      },
-      async editConfig(service_id) {
-        if (typeof(service_id) === 'number') {
-          this.configService = service_id;
-          this.configFiles = {};
-          var configindex= Object.keys(this.services[service_id].gameserver.game_specific.config_files);
-          for (var i = 0; i<configindex.length; i++) {
-            try {
-              var that = this;
-              var filename = this.services[service_id].gameserver.game_specific.config_files[i];
-              filename = filename.split('/');
-              filename.splice(0, 1);
-              filename = filename.join('/');
-              filename = this.services[service_id].gameserver.game_specific.path + filename;
-              var content = this.nitrapi.gameserver.gameserverFilesDownload(service_id, filename).
-                  then(function(data) {
-                    var f = filename;
-                    that.$http.get(data.data.token.url).then(function(response) {
-                      that.updateConfig(f, response.body);
-
-                    });
-                  });
-            } catch (e) {
-              console.log(e);
-            }
-          }
-        } else {
-          this.configFiles = null;
-          this.configService  = null;
-        }
-      },
-      updateConfig(path, content) {
-        Vue.set(this.configFiles, path, content);
-      },
-      uploadConfig(file, service_id) {
-        var fullfile=file;
-        var filename=file.split('/');
-        filename=filename[filename.length-1];
-        var path = file.replace(filename, '');
-        var that = this;
-        var service_id = service_id;
-            this.nitrapi.gameserver.gameserverFilesUpload(service_id, path, filename).then(function(data) {
-                that.$http.post(data.data.token.url, that.configFiles[fullfile], {
-                  headers: {
-                    'Content-Type': 'application/binary',
-                    'token': data.data.token.token
-                  }
-                }).then(console.log);
-            });
-      },
-      deployConfig(file, global = false) {
-        var services = Object.keys(this.services);
-        var service = this.services[this.configService];
-        var game = service.gameserver.game;
-        if (global) {
-          for (var i = 0; i < services.length; i++) {
-            if (this.services[services[i]].gameserver.game === game) {
-              this.uploadConfig(file, services[i]);
-            }
-          }
-        } else {
-          this.uploadConfig(file, service.id);
-        }
-      },
-      schedule(action, id, notify = true) {
-        var that = this;
-        switch (action) {
-          case 'restart':
-            this.nitrapi.gameserver.restart(id).then(function(data) {
-              that.message = data.message;
-            });
-            if (notify) {
-              that.notify = true;
-              this.refresh(2000);
-            }
-            break;
-          case 'stop':
-            this.nitrapi.gameserver.stop(id).then(function(data) {
-              that.message = data.message;
-            });
-            if (notify) {
-              that.notify = true;
-              this.refresh(10000);
-            }
-            break;
-          default:
-            this.message = 'Unknown action: ' + action;
-            this.notify = true;
-        }
-      },
-      async refresh(ms = 0) {
-        var that = this;
-        if (that.refreshing) {
-          return;
-        }
-        that.refreshing = true;
-        await this.sleep(ms);
-        this.nitrapi.service.list().then(function(services) {
-          var service_ids = [];
-          for (var i = 0; i < services.data.services.length; i++) {
-            if (services.data.services[i].type === 'gameserver' &&
-                services.data.services[i].status === 'active') {
-              that.updateService(services.data.services[i]);
-            }
-          }
-        });
-        that.refreshing = false;
-      },
-      updateService(service) {
-        var that = this;
-        var service = service;
-        this.nitrapi.gameserver.details(service.id).then(function(data) {
-          service.gameserver = data.data.gameserver;
-          Vue.set(that.services, service.id, service);
-        });
+    var services = Object.keys(this.services);
+    for (var i = 0; i < services.length; i++) {
+      this.progress = i / services.length * 100;
+      this.current = services[i];
+      this.schedule(action, services[i], false);
+      if (this.delay > 0) {
+        await this.sleep(this.delay * 1000);
       }
-    },
-    created: function() {
-      this.nitrapi = new Nitrapi(this.access_token);
-      this.refresh();
-      window.setInterval(this.refresh, 1 * 60 * 1000);
     }
+    this.progress = false;
+    this.current = false;
+    this.message = (action == 'restart' ? 'Restarted' : 'Stopped') + ' all Gameservers';
+    this.notify = true;
+    var ms = 10000;
+    if (action === 'restart') {
+      ms = 20000;
+    }
+    this.refresh(ms);
+  },
+  async editConfig(service_id) {
+    if (typeof(service_id) === 'number') {
+      this.configService = service_id;
+      this.configFiles = {};
+      var configindex = Object.keys(
+          this.services[service_id].gameserver.game_specific.config_files);
+      for (var i = 0; i < configindex.length; i++) {
+        try {
+          var that = this;
+          var filename = this.services[service_id].gameserver.game_specific.config_files[i];
+          filename = filename.split('/');
+          filename.splice(0, 1);
+          filename = filename.join('/');
+          filename = this.services[service_id].gameserver.game_specific.path + filename;
+          this.updateConfig(service_id, filename);
+        } catch (e) {
+          console.log(e);
+        }
+      }
+    } else {
+      this.configFiles = null;
+      this.configService = null;
+    }
+  },
+  updateConfig(service_id, filename) {
+    var that = this;
+    this.nitrapi.gameserver.gameserverFilesDownload(service_id, filename).
+        then(function(data) {
+          that.$http.get(data.data.token.url).then(function(response) {
+            content = response.body;
+            if (typeof(content) === 'object')
+              content = JSON.stringify(content);
+            Vue.set(that.configFiles, filename, content);
+          });
+        });
+  },
+  uploadConfig(file, service_id, content) {
+    var fullfile = file;
+    var filename = file.split('/');
+    filename = filename[filename.length - 1];
+    var path = file.replace(filename, '');
+    var that = this;
+    var service_id = service_id;
+    this.nitrapi.gameserver.gameserverFilesUpload(service_id, path, filename).
+        then(function(data) {
+          that.$http.post(data.data.token.url, content, {
+            headers: {
+              'Content-Type': 'application/binary',
+              'token': data.data.token.token
+            }
+          }).then(console.log);
+        });
+  },
+  deployConfig(file, global = false) {
+    var services = Object.keys(this.services);
+    var service = this.services[this.configService];
+    var content = this.configFiles[file];
+    var game = service.gameserver.game;
+    if (global) {
+      for (var i = 0; i < services.length; i++) {
+        if (this.services[services[i]].gameserver.game === game) {
+          this.uploadConfig(file.replace(service.username, this.services[services[i]].username), services[i], content);
+        }
+      }
+    } else {
+      this.uploadConfig(file, service.id, content);
+    }
+  },
+  schedule(action, id, notify = true) {
+    var that = this;
+    switch (action) {
+      case 'restart':
+        this.nitrapi.gameserver.restart(id).then(function(data) {
+          that.message = data.message;
+        });
+        if (notify) {
+          that.notify = true;
+          this.refresh(2000);
+        }
+        break;
+      case 'stop':
+        this.nitrapi.gameserver.stop(id).then(function(data) {
+          that.message = data.message;
+        });
+        if (notify) {
+          that.notify = true;
+          this.refresh(10000);
+        }
+        break;
+      default:
+        this.message = 'Unknown action: ' + action;
+        this.notify = true;
+    }
+  },
+  async refresh(ms = 0) {
+    var that = this;
+    if (that.refreshing) {
+      return;
+    }
+    that.refreshing = true;
+    await this.sleep(ms);
+    this.nitrapi.service.list().then(function(services) {
+      var service_ids = [];
+      for (var i = 0; i < services.data.services.length; i++) {
+        if (services.data.services[i].type === 'gameserver' &&
+            services.data.services[i].status === 'active') {
+          that.updateService(services.data.services[i]);
+        }
+      }
+    });
+    that.refreshing = false;
+  },
+  updateService(service) {
+    var that = this;
+    var service = service;
+    this.nitrapi.gameserver.details(service.id).then(function(data) {
+      service.gameserver = data.data.gameserver;
+      Vue.set(that.services, service.id, service);
+    });
+  }
+  },
+  created: function() {
+    this.nitrapi = new Nitrapi(this.access_token);
+    this.refresh();
+    window.setInterval(this.refresh, 1 * 60 * 1000);
+  }
   });
 </script>
 <style>
@@ -267,16 +276,20 @@
         margin-left: auto;
         margin-right: auto;
     }
+
     .md-dialog-fullscreen {
         width: 100%;
         height: 100%;
     }
+
     .md-tabs-content {
         height: 100% !important;
     }
+
     .md-tab {
         height: 100%;
     }
+
     .md-textarea {
         max-height: 10000px;
     }
