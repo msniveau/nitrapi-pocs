@@ -3,6 +3,7 @@
 <head>
     <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.min.js"></script>
     <script src="https://unpkg.com/vue-material@beta"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue-resource@1.5.1"></script>
     <script src="https://static.nitrado.net/cdn/nitrapi/nitrapi.min.js"></script>
     <meta content="width=device-width,initial-scale=1,minimal-ui" name="viewport">
     <link rel="stylesheet"
@@ -61,27 +62,56 @@
                            @click="schedule('stop',service.id)">
                     <md-icon class="md-accent">stop</md-icon>
                 </md-button>
+                <md-speed-dial md-direction="bottom">
+                    <md-button class="md-primary md-icon-button">
+                        <md-icon>settings</md-icon>
+                    </md-button>
+
+                    <md-speed-dial-content>
+                        <md-button class="md-icon-button" @click="editConfig(service.id)">
+                            <md-icon>edit</md-icon>
+                        </md-button>
+                    </md-speed-dial-content>
+                </md-speed-dial>
             </div>
         </md-list-item>
         <md-snackbar md-position="center" :md-active.sync="notify" md-persistent>
             <span>{{ message }}</span>
             <md-button class="md-primary" @click="showSnackbar = false">ok</md-button>
         </md-snackbar>
+        <md-dialog :md-active.sync="configFiles">
+            <md-dialog-title>Config Editor</md-dialog-title>
+
+            <md-tabs>
+                <md-tab :md-label="file.split('/').slice(-1)[0]" v-for="cfg, file in configFiles">
+                    <md-field>
+                        <label>Textarea</label>
+                        <md-textarea v-model="configFiles[file]" style="height:500px;"></md-textarea>
+                    </md-field>
+                    <md-button class="md-primary" @click="configFiles = null">cancel</md-button>
+                    <md-button class="md-accent" @click="deployConfig(file, true)">Deploy to all</md-button>
+                    <md-button class="md-accent" @click="deployConfig(file)">Deploy to this</md-button>
+                </md-tab>
+            </md-tabs>
+        </md-dialog>
     </md-list>
 </div>
 <script>
   Vue.use(VueMaterial.default);
+  Vue.use(VueResource);
   var app = new Vue({
     el: '#app',
     data: {
       services: {},
+      configService: null,
+      configFiles: null,
       notify: false,
       message: '',
       current: false,
       delay: 0,
       progress: false,
       refreshing: false,
-      access_token: 'ACCESS_TOKEN_HERE'
+      access_token: '$ACCESS_TOKEN_HERE$',
     },
     methods: {
       sleep(ms) {
@@ -106,6 +136,69 @@
           ms = 20000;
         }
         this.refresh(ms);
+      },
+      async editConfig(service_id) {
+        if (typeof(service_id) === 'number') {
+          this.configService = service_id;
+          this.configFiles = {};
+          var configindex= Object.keys(this.services[service_id].gameserver.game_specific.config_files);
+          for (var i = 0; i<configindex.length; i++) {
+            try {
+              var that = this;
+              var filename = this.services[service_id].gameserver.game_specific.config_files[i];
+              filename = filename.split('/');
+              filename.splice(0, 1);
+              filename = filename.join('/');
+              filename = this.services[service_id].gameserver.game_specific.path + filename;
+              var content = this.nitrapi.gameserver.gameserverFilesDownload(service_id, filename).
+                  then(function(data) {
+                    var f = filename;
+                    that.$http.get(data.data.token.url).then(function(response) {
+                      that.updateConfig(f, response.body);
+
+                    });
+                  });
+            } catch (e) {
+              console.log(e);
+            }
+          }
+        } else {
+          this.configFiles = null;
+          this.configService  = null;
+        }
+      },
+      updateConfig(path, content) {
+        Vue.set(this.configFiles, path, content);
+      },
+      uploadConfig(file, service_id) {
+        var fullfile=file;
+        var filename=file.split('/');
+        filename=filename[filename.length-1];
+        var path = file.replace(filename, '');
+        var that = this;
+        var service_id = service_id;
+            this.nitrapi.gameserver.gameserverFilesUpload(service_id, path, filename).then(function(data) {
+                that.$http.post(data.data.token.url, that.configFiles[fullfile], {
+                  headers: {
+                    'Content-Type': 'application/binary',
+                    'token': data.data.token.token
+                  }
+                }).then(console.log);
+            });
+      },
+      deployConfig(file, global = false) {
+        var services = Object.keys(this.services);
+        var service = this.services[this.configService];
+        var game = service.gameserver.game;
+        if (global) {
+          for (var i = 0; i < services.length; i++) {
+            if (this.services[services[i]].gameserver.game === game) {
+              this.uploadConfig(file, services[i]);
+            }
+          }
+        } else {
+          this.uploadConfig(file, service.id);
+        }
       },
       schedule(action, id, notify = true) {
         var that = this;
@@ -174,6 +267,20 @@
         margin-left: auto;
         margin-right: auto;
     }
+    .md-dialog-fullscreen {
+        width: 100%;
+        height: 100%;
+    }
+    .md-tabs-content {
+        height: 100% !important;
+    }
+    .md-tab {
+        height: 100%;
+    }
+    .md-textarea {
+        max-height: 10000px;
+    }
+
 </style>
 
 </body>
