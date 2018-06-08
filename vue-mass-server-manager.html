@@ -77,7 +77,7 @@
         </md-list-item>
         <md-snackbar md-position="center" :md-active.sync="notify" md-persistent>
             <span>{{ message }}</span>
-            <md-button class="md-primary" @click="showSnackbar = false">ok</md-button>
+            <md-button class="md-primary" @click="notify = false">ok</md-button>
         </md-snackbar>
         <md-dialog :md-active.sync="configFiles">
             <md-dialog-title>Config Editor</md-dialog-title>
